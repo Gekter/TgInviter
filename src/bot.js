@@ -6,8 +6,280 @@ import fs from 'fs';
 const confname = './config.json'
 let config = JSON.parse(fs.readFileSync(confname))
 
+let temp = {}
 
-const bot = new TelegramBotApi(config.botToken, {polling: true})
+class Bot {
+  constructor(config) {
+    this.config = config
+    this.bot = new TelegramBotApi(config.botToken, {polling: true})
+    this.messages = {}
+    this.eventEmitter = new TelegramBotApi.EventEmitter()
+    this.client = new TelegramClient(new StringSession(config.stringSession), config.apiId, config.apiHash, {
+      connectionRetries: 5,
+    });
+    
+    
+    this.listtenersInit()
+  }
+
+  checkAccess(id, username) {
+    if (!config.admins.includes(username)) {
+      this.bot.sendMessage(id, `Нет доступа\nдля получения доступа попросите админа дать доступ своему - ${username}`)
+      return false
+    }
+    return true
+  }
+
+  showMainMenu(id) {
+    this.bot.sendMessage(id, 'Главное меню', {
+      'reply_markup': {
+        'keyboard': [
+          ['Разослать сообщение'],
+          ['Разослать приглашения'],
+          ['Настройки']
+        ]
+      }
+    })
+  }
+  
+  settings(id) {
+    this.bot.sendMessage(id, 'Выберите что хотите изменить', {
+      'reply_markup': {
+        'keyboard': [
+          ['apiId', 'apiHash', 'Канал'],
+          ['Ограничение по приглашениям', 'Добавить админа', 'Сообщение для рассылки'],
+          ['Текущая конфигурация'],
+          ['Назад']
+        ]
+      }
+    })
+  }
+
+  changeConfig(key, value) {
+
+  }
+
+  setHandler() {
+
+
+    eventEmitter.on('')
+  }
+
+  async deleteContacts(ids) {
+    await this.client.connect();
+
+    this.client.invoke(
+      new Api.contacts.DeleteContacts({
+        id: ids,
+      })
+    );
+  }
+
+  async invite(clientid, ids) {
+
+    
+    await this.client.connect();
+    
+    if (ids.length > this.config.inviteCap) {
+      ids = ids.slice(this.config.invitedCount, this.config.inviteCap)
+      this.config.invitedCount += this.config.inviteCap
+      
+    } else {
+      this.config.invitedCount += ids.length
+    }
+    fs.writeFile(confname, JSON.stringify(this.config), (err) => {
+      if (err) {
+        console.log(err)
+      }
+    });
+
+    await this.client.invoke(
+      new Api.channels.InviteToChannel({
+        channel: this.config.channel,
+        users: ids,
+      })
+    );
+
+    this.deleteContacts(ids)
+    
+    await this.bot.sendMessage(clientid, `Отправлено ${ids.length} приглашений`)
+  }
+
+  async send(clientid, ids) {
+    await this.client.connect();
+    if (ids.length > this.config.inviteCap) {
+      ids = ids.slice(this.config.invitedCount, this.config.inviteCap)
+      this.config.invitedCount += this.config.inviteCap
+      
+    }  else {
+      this.config.invitedCount += ids.length
+    }
+
+    fs.writeFile(confname, JSON.stringify(this.config), (err) => {
+      if (err) {
+        console.log(err)
+      }
+    });
+
+    ids.forEach(async (id) => {
+      await this.client.invoke(
+        new Api.messages.SendMessage({
+          peer: id,
+          message: this.config.message,
+          randomId: BigInt(Math.floor(Math.random() * 100000000)),
+          noWebpage: true,
+        })
+      );
+    })
+    
+    this.deleteContacts(ids)
+    await this.bot.sendMessage(clientid, `Отправлено ${ids.length} приглашений`)
+  }
+
+  async getIds(phoneNumbers) {
+    
+    let contacts = []
+    phoneNumbers.forEach((phone) => {
+      contacts.push(
+        new Api.InputPhoneContact({
+          clientId: +phone,
+          phone: phone,
+          firstName: phone,
+          lastName: "",
+        })
+      )
+    })
+    
+    await this.client.connect();
+   
+
+    const res = await this.client.invoke(
+      new Api.contacts.ImportContacts({
+        contacts: contacts,
+      })
+    );
+
+
+    let ids = []
+    res.users.forEach((item) => {
+      ids.push(Number(item.id.value))
+    })
+
+    return ids
+    
+  }
+
+  listtenersInit() {
+    this.bot.onText(/\/start/, msg => {
+      if (!this.checkAccess(msg.from.id, msg.from.username)) return
+      
+      if (config.stringSession == '') {
+        return this.bot.sendMessage(msg.from.id, `Пожалуйста запустите getStringSession.js и заполните в config.js stringSession`)
+      }
+      this.showMainMenu(msg.from.id)
+    })
+
+    this.bot.onText(/Настройки/, msg => {
+      if (!this.checkAccess(msg.from.id, msg.from.username)) return
+
+      this.settings(msg.from.id)
+    })
+
+    this.bot.onText(/Разослать приглашения/, msg => {
+      if (!this.checkAccess(msg.from.id, msg.from.username)) return
+
+      try {
+        let ids = JSON.parse(fs.readFileSync('./' + config.idsFileName))
+        this.invite(msg.from.id, ids)
+      } catch {
+        return this.bot.sendMessage(clientid, 'Сначала загрузите excel с номерами телефонов')
+      }
+      
+    })
+
+    this.bot.onText(/Разослать сообщение/, msg => {
+      if (!this.checkAccess(msg.from.id, msg.from.username)) return
+
+      try {
+        let ids = JSON.parse(fs.readFileSync('./ids.json'))
+        this.send(msg.from.id, ids)
+      } catch {
+        this.bot.sendMessage(msg.from.id, 'Сначала загрузите excel с номерами телефонов')
+      }
+    })
+
+    this.bot.onText(/Назад/, msg => {
+      if (!this.checkAccess(msg.from.id, msg.from.username)) return
+
+      this.showMainMenu(msg.from.id)
+    })
+
+    this.bot.onText(/Текущая конфигурация/, msg => {
+      if (!this.checkAccess(msg.from.id, msg.from.username)) return
+      let cfg = Object.entries(this.config)
+      let text = []
+      cfg.forEach((each) => {
+        each[0] = '<b><i>' + each[0] + '</i></b>:'
+        text.push(each.join(' '))
+      })
+      
+      this.bot.sendMessage(msg.from.id, text.join('\n\n'), {parse_mode: 'HTML'})
+    })
+
+    
+
+    this.bot.onText(/apiId/, msg => {
+      if (!this.checkAccess(msg.from.id, msg.from.username)) return
+      
+      this.bot.sendMessage(msg.from.id, 'sdf')
+      // fs.writeFile(confname, JSON.stringify(config), (err) => { if (err) {console.log(err)}});
+    })
+
+
+
+    this.bot.on('document', async msg => {
+      if (!this.checkAccess(msg.from.id, msg.from.username)) return
+  
+      if (msg.document.mime_type != 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+        return bot.sendMessage(msg.from.id, 'Данный файл не является excel')
+      }
+      const path = './'
+      let phoneNumbers = []
+  
+      let filename = await this.bot.downloadFile(msg.document.file_id, path)
+      try {
+        let rows = await readXlsxFile(path + filename)
+        for(let row of rows) {
+          let phoneNumber = row[0].toString()
+          if (phoneNumber[0] == '+') phoneNumber = '+' + phoneNumber
+          if (phoneNumber[1] != '8') phoneNumber = '+7' + phoneNumber.substring(1, row[0].length)
+          phoneNumbers.push(phoneNumber)
+        }
+
+        let ids = await this.getIds(phoneNumbers)
+        
+        await Promise.all([
+          fs.writeFile(path + this.config.idsFileName, JSON.stringify(ids), (err) => { if (err) { throw err } }),
+          fs.unlink(path + filename, (err) => { if (err) { throw err } })
+        ])
+
+        return this.bot.sendMessage(msg.from.id, 'Файл успешно загружен')
+      } catch (err) {
+        console.log(err)
+        return this.bot.sendMessage(msg.from.id, 'Не удалось загрузить файл')
+      }
+      
+    })
+
+    this.bot.on('message', msg => {
+      this.messages[msg.from.id] = msg.text
+    })
+  }
+
+
+
+}
+
 
 const start = () => {
   function checkAccess(id, username) {
@@ -31,6 +303,10 @@ const start = () => {
       })
     })
   }
+
+  bot.on('message', msg => {
+    temp[msg.from.id] = {"message": msg.text, "confirm": false}
+  })
 
   bot.onText(/\/start/, msg => {
     if (!checkAccess(msg.from.id, msg.from.username)) return
@@ -126,6 +402,11 @@ const start = () => {
   bot.onText(/\/settings/, msg => {
     settings(msg.from.id)
   })
+
+  bot.onText(/\/settings/, msg => {
+    settings(msg.from.id)
+  })
+
   
   bot.on('callback_query', msg => {
     let message = "Введите "
@@ -265,4 +546,4 @@ const start = () => {
 }
 
 
-start()
+const boter = new Bot(config);

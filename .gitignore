@@ -3,6 +3,8 @@ logs
 *.log
 npm-debug.log*
 config.json
+123.js
+ids.json
 phoneNumbers.json
 
 # Runtime data
