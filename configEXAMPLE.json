@@ -1,8 +1,10 @@
-{"apiId":1111111,
-  "apiHash":"111111",
+{"apiId": 1111111,
+  "apiHash":"",
   "stringSession":"",
-  "channel":"o5yailineya",
+  "botToken":"",
+  "channel":"",
   "inviteCap":200,
   "invitedCount":0,
-  "phoneNumbersFileName":"phoneNumbers.json",
-  "admins":["Username"]}
+  "idsFileName":"ids.json",
+  "admins":[""],
+  "message": "Сорян, Это тестовое сообщение, пожалуйста не отвечайте ()"}
